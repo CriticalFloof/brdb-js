@@ -1,0 +1,55 @@
+BRDB SQL Tables:
+
+blobs: Stores the raw data of the world, delta_base_id refers to other blobs
+revisions: Likely refers to consecutive saves on the same DB, maybe the idea here is to decrease save times by only saving the differences?
+folders: Tree of ids with associated names, parent_id refers to other folders.
+files: Collection of ids with associated names, parent_id refers to other folders, content_id points to the associated blob_id.
+
+blobs are compressed using zstd compression when their compression field is set to 1.
+Therefore the user MUST have zstd installed on their system.
+
+Table structure rundown:
+
+blobs:
+{
+  blob_id: Integer PRIMARY KEY,
+  compression: Integer,
+  size_uncompressed: Integer,
+  size_compressed: Integer,
+  delta_base_id: Integer,
+  hash: Blob,
+  content: Blob
+}
+
+revisions:
+{
+  revision_id: Integer PRIMARY KEY,
+  description: Text,
+  created_at: Integer
+}
+
+folders:
+{
+  folder_id: Integer PRIMARY KEY,
+  parent_id: Integer REFERENCES folders(folder_id),
+  name: Text,
+  created_at: Integer,
+  deleted_at: Integer
+}
+
+files:
+{
+  file_id: Integer PRIMARY KEY,
+  parent_id: Integer REFERENCES folders(folder_id),
+  name: Text,
+  content_id: Integer,
+  created_at: Integer,
+  deleted_at: Integer
+}
+
+
+The folders and files represent a virtual file system, the current struct of which is
+
+Meta 
+World
+  
