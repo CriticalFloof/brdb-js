@@ -48,8 +48,5 @@ files:
 }
 
 
-The folders and files represent a virtual file system, the current struct of which is
-
-Meta 
-World
+The folders and files represent a virtual file system.
   
