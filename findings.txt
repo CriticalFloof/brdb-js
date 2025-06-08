@@ -49,4 +49,7 @@ files:
 
 
 The folders and files represent a virtual file system.
+
+.mps files contain raw data, they must be paired with a .schema in the same folder or parents if shared.
   
+It appears that when parsing raw data, the top level structure to start from is located at the bottom.
