@@ -7,8 +7,9 @@
 1. Clone the repository.
 2. Install the [zstd](https://github.com/facebook/zstd) compression library.
 3. Ensure that zstd is visible from your system path.
-4. Go to the root directory of the repository, and run `npm run build`
-5. Finally, run `node dist/dist.node.js`
+4. Go to the root directory of the repository, and run `npm i` to install dependencies.
+5. Then run `npm run build`.
+6. Finally, run `node dist/dist.node.js`.
 
 #### Notice
 
