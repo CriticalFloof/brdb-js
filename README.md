@@ -11,6 +11,8 @@
 5. Then run `npm run build`.
 6. Finally, run `node dist/dist.node.js`.
 
+Currently running the file will result in a dump folder within the project root that contains all of the decoded globs of the world, as well as their decoded schemas.
+
 #### Notice
 
 This current version can only process "Parkour.brdb" from the input folder, if you want to process another world, you'll have to modify index.ts and rebuild.
