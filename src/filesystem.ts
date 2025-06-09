@@ -1,7 +1,8 @@
 import { FilesTable, FoldersTable } from './db_types';
 
+const MAX_DEPTH = 16;
+
 export function buildFileSystem(folders: FoldersTable[], files: FilesTable[]): Object {
-    const MAX_DEPTH = 16;
 
     let vfs = {};
     let reference = vfs;
@@ -56,7 +57,56 @@ export function buildFileSystem(folders: FoldersTable[], files: FilesTable[]): O
     return vfs;
 }
 
-export function search(object, key) {
+export function findAssociatedSchema(folders: FoldersTable[], files: FilesTable[], vfs: Object, mpsFile: FilesTable): FilesTable {
+
+    //console.log("===== Starting =====");
+
+    let result: FilesTable = null;
+
+    if(mpsFile.name == "Owners.mps") {
+        result = vfs["World"]["_children"][0]["_children"]["Owners.schema"];
+
+    } else if(mpsFile.name == "GlobalData.mps") {
+        result = vfs["World"]["_children"][0]["_children"]["GlobalData.schema"];
+
+    } else if(mpsFile.name == "ChunkIndex.mps") {
+        if(folders[mpsFile.parent_id - 1].name == "Entities") {
+            result = vfs["World"]["_children"][0]["_children"]["Entities"]["_children"]["ChunkIndex.schema"]
+
+        } else if(!Number.isNaN(folders[mpsFile.parent_id - 1].name)){
+            result = vfs["World"]["_children"][0]["_children"]["Bricks"]["_children"]["ChunkIndexShared.schema"]
+
+        }
+
+    } else if(folders[mpsFile.parent_id - 1].name == "Chunks") {
+        if(folders[folders[mpsFile.parent_id - 1].parent_id - 1].name == "Entities") {
+            result = vfs["World"]["_children"][0]["_children"]["Entities"]["_children"]["ChunksShared.schema"]
+
+        } else if(!Number.isNaN(folders[folders[mpsFile.parent_id - 1].parent_id - 1].name)){
+            result = vfs["World"]["_children"][0]["_children"]["Bricks"]["_children"]["ChunksShared.schema"]
+        }
+
+    } else if(folders[mpsFile.parent_id - 1].name == "Components") {
+        if(folders[folders[mpsFile.parent_id - 1].parent_id - 1].name == "Entities") {
+            result = vfs["World"]["_children"][0]["_children"]["Entities"]["_children"]["ComponentsShared.schema"]
+
+        } else if(!Number.isNaN(folders[folders[mpsFile.parent_id - 1].parent_id - 1].name)){
+            result = vfs["World"]["_children"][0]["_children"]["Bricks"]["_children"]["ComponentsShared.schema"]
+        }
+
+    } else if(folders[mpsFile.parent_id - 1].name == "Wires") {
+        if(folders[folders[mpsFile.parent_id - 1].parent_id - 1].name == "Entities") {
+            result = vfs["World"]["_children"][0]["_children"]["Entities"]["_children"]["WiresShared.schema"]
+
+        } else if(!Number.isNaN(folders[folders[mpsFile.parent_id - 1].parent_id - 1].name)){
+            result = vfs["World"]["_children"][0]["_children"]["Bricks"]["_children"]["WiresShared.schema"]
+        }
+    }
+
+    return result;
+}
+
+function search(object, key) {
     var value;
     Object.keys(object).some(function(k) {
         if (k === key) {

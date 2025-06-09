@@ -52,4 +52,42 @@ The folders and files represent a virtual file system.
 
 .mps files contain raw data, they must be paired with a .schema in the same folder or parents if shared.
   
-It appears that when parsing raw data, the top level structure to start from is located at the bottom.
+When parsing raw data, the top level structure to start from is located at the bottom of the schema.
+
+The db filesystem is in this structure:
+
+{
+Meta
+  Bundle.json
+  World.json
+  Screenshot.jpg
+World
+  0
+    Entities
+      Chunks?
+        x_x_x.mps // schema found at ChunksShared.schema  1 layer above
+      ChunkIndex.mps // schema found at ChunkIndex.schema at the same layer
+      ChunkIndex.schema
+      ChunksShared.schema
+    Bricks
+      Grids
+        1..n
+          Chunks? 
+            x_x_x.mps // schema found at ChunksShared.schema  3 layers above
+          Components? 
+            x_x_x.mps // schema found at ComponentsShared.schema  3 layers above
+          Wires? 
+            x_x_x.mps // schema found at WiresShared.schema 3 layers above
+          ChunkIndex.mps // schema found at ChunkIndexShared.schema 2 layers above
+      ChunkIndexShared.schema
+      ChunksShared.schema
+      ComponentsShared.schema
+      WiresShared.schema
+    Environment.bp
+    Minigame.bp
+    Owners.mps // schema found at Owners.schema at the same layer
+    Owners.schema
+    GlobalData.mps // schema found at GlobalData.schema at the same layer
+    GlobalData.schema
+}    
+          

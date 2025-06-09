@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { BLOBS, FILES, FOLDERS } from "./constants";
 import { BlobsTable, FilesTable, FoldersTable } from "./db_types";
 import * as msgpack from "./msgpack"
-import { buildFileSystem, search } from './filesystem';
+import { buildFileSystem, findAssociatedSchema } from './filesystem';
 
 
 const options = {
@@ -31,20 +31,11 @@ async function read(db: Database) {
 
     const blobs = db.prepare(`SELECT * FROM "${BLOBS}"`).all() as BlobsTable[];
 
-    const dbFs: Object = buildFileSystem(folders, files);
+    const vfs: Object = buildFileSystem(folders, files);
+
+    const debugStoredSchemas = new Set()
 
     for (const file of files) {
-
-
-
-
-        //console.log(file)
-
-
-
-        //console.log(dbFs);
-
-
 
         if (file.name.endsWith(".json")) {
             //console.log(bufferData.toString());
@@ -53,12 +44,16 @@ async function read(db: Database) {
             // Process Schema
 
             //try {
-                const schemaFile: FilesTable = search(dbFs, file.name.replace(".mps", ".schema"));
+                const schemaFile: FilesTable = findAssociatedSchema(folders, files, vfs, file);
 
                 const schemaBlobInfo = blobs[schemaFile.content_id - 1];
                 let schemaBuffer: Buffer = schemaBlobInfo.compression == 0 ? schemaBlobInfo.content : await decompressBlob(schemaBlobInfo.content);
 
                 const schema: Object = msgpack.decode_schema(schemaBuffer);
+                debugStoredSchemas.add(schema);
+
+                fs.mkdirSync(`./dump/found_schemas/${schemaFile.name.replace('.schema', '.json')}`, {recursive: true});
+
                 console.log("====SCHEMA====")
                 console.dir(schema, { depth: null });
 
@@ -69,18 +64,19 @@ async function read(db: Database) {
                 const rawBuffer: Buffer = rawBlobInfo.compression == 0 ? rawBlobInfo.content : await decompressBlob(rawBlobInfo.content);
 
                 const output = msgpack.decode_raw(schema, rawBuffer);
-                console.log("====OUTPUT====")
-                console.dir(output, { depth: null });
-                //return;
+
+                fs.mkdirSync(`./dump/world_data_json/${schemaFile.name.replace('.schema', '')}`, {recursive: true});
+                fs.writeFile(path.join(`./dump/world_data_json/${schemaFile.name.replace('.schema', '')}/${file.name.replace('.mps', '')}__${file.file_id}.json`), JSON.stringify(output, null, 4), ()=>{});
+
+                //console.log("====OUTPUT====")
+                //console.dir(output, { depth: null });
+                
             //} catch (error) {
             //    console.log(`Failed to decode '${file.name}'`)
             //}
 
         }
-
     }
-
-
 }
 
 function decompressBlob(data: Buffer): Promise<Buffer> {
