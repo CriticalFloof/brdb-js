@@ -733,7 +733,7 @@ function isPrimitiveType(str: string): boolean {
     }
 }
 
-function getType(num: number): string {
+function getTypeDebug(num: number): string {
 
     switch (num) {
         case type.fixintp: return "fixintp  ";
