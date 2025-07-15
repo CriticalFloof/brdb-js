@@ -1,4 +1,7 @@
-const enum type {
+import { Transform } from "node:stream";
+import { TransformCallback } from "stream";
+
+const enum msgpackType {
     fixintp = 0x7f,
     fixmap = 0x8f,
     fixarray = 0x9f,
@@ -38,740 +41,961 @@ const enum type {
     fixintn = 0xff
 }
 
-
-
-export function decode_schema(data: Buffer): Object {
-
-    const CONTAINER_ARRAY = false;
-    const CONTAINER_MAP = true;
-
-    let key_store: any = null;
-
-    let output: any = null;
-    let output_ref_stack: any[] = [];
-
-    let container_stack: boolean[] = [];
-    let index_stack: number[] = [];
-    let lifetime_stack: number[] = [];
-
-    let debug_arr: any[] = [];
-
-    for (let i = 0; i < data.byteLength; i++) {
-
-        const token: number = data[i];
-
-        switch (token) {
-            case type.nil: {
-                store_value(null);
-                break;
-            }
-            case type.neverused: {
-                break;
-            }
-            case type.false: {
-                store_value(false);
-                break;
-            }
-            case type.true: {
-                store_value(true);
-                break;
-            }
-            case type.bin8: {
-                const size = data.readUint8(i + 1);
-                i++;
-
-                const buffer = readBin(data, i, size);
-                store_value(buffer)
-                i += size;
-                break;
-            }
-            case type.bin16: {
-                const size = data.readUint16BE(i + 1);
-                i += 2;
-
-                const buffer = readBin(data, i, size);
-                store_value(buffer)
-                i += size;
-                break;
-            }
-            case type.bin32: {
-                const size = data.readUint32BE(i + 1);
-                i += 4;
-
-                const buffer = readBin(data, i, size);
-                store_value(buffer)
-                i += size;
-                break;
-            }
-            case type.ext8: {
-                console.log("Not Implemented!");
-                const size = data.readUint8(i + 1);
-                i += 1 + 1;
-
-                i += size;
-                break;
-            }
-            case type.ext16: {
-                console.log("Not Implemented!");
-                const size = data.readUint16BE(i + 1);
-                i += 2 + 1;
-
-                i += size;
-                break;
-            }
-            case type.ext32: {
-                console.log("Not Implemented!");
-                const size = data.readUint32BE(i + 1);
-                i += 4 + 1;
-
-                i += size;
-                break;
-            }
-            case type.float32: {
-                store_value(data.readFloatBE(i + 1));
-                i += 4;
-                break;
-            }
-            case type.float64: {
-                store_value(data.readDoubleBE(i + 1));
-                i += 8;
-                break;
-            }
-            case type.uint8: {
-                store_value(data.readUint8(i + 1));
-                i++;
-                break;
-            }
-            case type.uint16: {
-                store_value(data.readUInt16BE(i + 1));
-                i += 2;
-                break;
-            }
-            case type.uint32: {
-                store_value(data.readUInt32BE(i + 1));
-                i += 4;
-                break;
-            }
-            case type.uint64: {
-                store_value(data.readBigUInt64BE(i + 1));
-                i += 8;
-                break;
-            }
-            case type.int8: {
-                store_value(data.readInt8(i + 1));
-                i++;
-                break;
-            }
-            case type.int16: {
-                store_value(data.readInt16BE(i + 1));
-                i += 2;
-                break;
-            }
-            case type.int32: {
-                store_value(data.readInt32BE(i + 1));
-                i += 4;
-                break;
-            }
-            case type.int64: {
-                store_value(data.readBigInt64BE(i + 1));
-                i += 8;
-                break;
-            }
-            case type.fixext1: {
-                console.log("Not Implemented!");
-                i += 1 + 1;
-                break;
-            }
-            case type.fixext2: {
-                console.log("Not Implemented!");
-                i += 2 + 1;
-                break;
-            }
-            case type.fixext4: {
-                console.log("Not Implemented!");
-                i += 4 + 1;
-                break;
-            }
-            case type.fixext8: {
-                console.log("Not Implemented!");
-                i += 8 + 1;
-                break;
-            }
-            case type.fixext16: {
-                console.log("Not Implemented!");
-                i += 16 + 1;
-                break;
-            }
-            case type.str8: {
-                const size = data[i + 1];
-                i++;
-
-                const str = readStr(data, i + 1, size);
-                store_value(str);
-                i += size;
-                break;
-            }
-            case type.str16: {
-                const size = data.readUint16BE(i + 1);
-                i += 2;
-
-                const str = readStr(data, i + 1, size);
-                store_value(str);
-                i += size;
-                break;
-            }
-            case type.str32: {
-                const size = data.readUint32BE(i + 1);
-                i += 4;
-
-                const str = readStr(data, i + 1, size);
-                store_value(str);
-                i += size;
-                break;
-            }
-            case type.array16: {
-                const size = data.readUint16BE(i + 1);
-                i += 2;
-
-                store_value([]);
-                add_scope(size);
-                break;
-            }
-            case type.array32: {
-                const size = data.readUint32BE(i + 1);
-                i += 4;
-
-                store_value([]);
-                add_scope(size);
-                break;
-            }
-            case type.map16: {
-                const size = data.readUint16BE(i + 1);
-                i += 2;
-
-                store_value({});
-                add_scope(size * 2);
-                break;
-            }
-            case type.map32: {
-                const size = data.readUint32BE(i + 1);
-                i += 4;
-
-                store_value({});
-                add_scope(size * 2);
-                break;
-            }
-            default: {
-                if (token <= type.fixintp) {
-                    store_value(token & 0x7f);
-
-                } else if (token <= type.fixmap) {
-                    store_value({});
-                    add_scope((token & 0x0f) * 2);
-
-                } else if (token <= type.fixarray) {
-                    store_value([]);
-                    add_scope(token & 0x0f);
-
-                } else if (token <= type.fixstr) {
-                    const size = (token & 0x1f);
-                    const str = readStr(data, i + 1, size);
-                    store_value(str);
-                    i += size;
-                } else {
-                    store_value(-(token & 0x1f));
-                }
-            }
-        }
-
-        tick_scope();
-    }
-
-    function store_value(value: any) {
-
-        debug_arr.push(value);
-
-        if (output_ref_stack.length == 0) {
-            output = value;
-        } else if (container_stack[container_stack.length - 1] == CONTAINER_MAP) {
-            if (index_stack[index_stack.length - 1] & 1) {
-                output_ref_stack[output_ref_stack.length - 1][key_store] = value;
-            } else {
-                key_store = value;
-            }
-        } else {
-            output_ref_stack[output_ref_stack.length - 1][index_stack[index_stack.length - 1]] = value;
-        }
-    }
-
-    function add_scope(lifetime: number) {
-
-        if (output_ref_stack.length == 0) {
-            output_ref_stack.push(output);
-        } else {
-            if (container_stack[container_stack.length - 1] == CONTAINER_MAP) {
-                output_ref_stack.push(output_ref_stack[output_ref_stack.length - 1][key_store]);
-            } else {
-                output_ref_stack.push(output_ref_stack[output_ref_stack.length - 1][index_stack[index_stack.length - 1]])
-            }
-
-        }
-
-        index_stack.push(-1);
-        lifetime_stack.push(lifetime);
-
-        container_stack.push(output_ref_stack[output_ref_stack.length - 1] instanceof Array ? CONTAINER_ARRAY : CONTAINER_MAP);
-
-    }
-
-    function tick_scope() {
-
-        while (lifetime_stack[lifetime_stack.length - 1] <= 0) {
-            index_stack.pop();
-            lifetime_stack.pop();
-            container_stack.pop();
-            output_ref_stack.pop();
-        }
-
-        lifetime_stack[lifetime_stack.length - 1]--;
-        index_stack[index_stack.length - 1]++;
-    }
-
-    return output;
+enum ReadStage {
+    StaticQuery,
+    DynamicQuery,
+    Complete
 }
 
-export function decode_raw(schema: Object, data: Buffer) {
+type ContextStackFrame = {
+    pendingReadStage: ReadStage;
+    type: msgpackType | null;
+    sizeLeft: number;
+    value: any;
+    objectKeyStorage?: any;
+}
 
-    type TagInfo = {
-        type: type,
-        value: any,
-        size: number
+type TrackedBuffer = {
+    readPtrPos: number;
+    buf: Buffer;
+}
+
+export class MsgPackDecodeStream extends Transform {
+
+    private bufferQueue: TrackedBuffer[] = [];
+    private bufferQueueBytes: number = 0;
+
+    private contextStack: ContextStackFrame[];
+
+    public constructor(options) {
+        super({ objectMode: true });
     }
 
-    const structDefinitions: Object[] = schema[1];
-    const structDefinitionsKeys: string[] = Object.keys(structDefinitions)
-    const startStruct = structDefinitions[structDefinitionsKeys[structDefinitionsKeys.length - 1]];
+    public _transform(chunk: Buffer, _: BufferEncoding, callback: TransformCallback): void {
+        // The process of reading a tag goes in most 3 stages:
+        // Read the type tag, which is always 1 byte, and push to the context stack [Identification]
+        // Then read the rest of the static info coupled to the tag we just read. [Static Query]
+        // Finally, if we're in a tag container we repeat the other stages without popping off the stack until the read size is reached [Dynamic Query / Tag Container]
+        // If we're not in a tag container then we continuously read a set size of bytes until the read size is reached. [Dynamic Query / Buffer Container]
+        // Once finished, we pop off context stack, and repeat everything until no more data.
 
-    let output = {}
-    output[structDefinitionsKeys[structDefinitionsKeys.length - 1]] = {}
+        // The Static Query stage only relies upon the type that we read in the ID stage.
+        // The Dynamic Query stage only relies upon the size that we read in either the ID or Static Query stage.
+        // Therefore it's possible to either skip Dynamic Query if there's no size information,
+        // or skip Static Query if the type read has no extra static info such as fixtypes.
 
-    let dataIndex: number = 0;
+        this.bufferQueue.push({ buf: chunk, readPtrPos: 0 });
+        this.bufferQueueBytes += chunk.byteLength;
 
 
-    function recursive_decode(inputSchemaStruct: Object, outputRef: Object, insideArray: boolean = false, repeat: number = 1) {
+        let nextQuerySize: number = this.getNextQuerySize();
+        while (this.bufferQueueBytes > nextQuerySize) {
+            const msgpackData: Buffer = this.eatBufferQueue(nextQuerySize)
+            this.consumeTag(msgpackData);
 
-        const inputSchemaKeys = Object.keys(inputSchemaStruct)
+            nextQuerySize = this.getNextQuerySize();
+        }
+    }
 
-        const iterations = insideArray ? 1 : inputSchemaKeys.length;
-        for (let i = 0; i < iterations; i++) {
-            const schemaFieldName = inputSchemaKeys[i];
-            const schemaEntryType = inputSchemaStruct[schemaFieldName];
-            //console.log(schemaEntryType)
-            //console.log("INPUT STRUCT")
-            //console.log(inputSchemaStruct)
+    private getNextQuerySize(): number {
+        if (this.contextStack.length === 0) return 1;
 
-            for (let j = 0; j < repeat; j++) {
-                
-                if(insideArray && schemaFieldName != '_primitive') {
-                    //console.log("Forced Struct Array Scope")
-                    //console.log(inputSchemaStruct)
-                    //console.log(schemaFieldName)
-                    outputRef[j] = {};
-                    recursive_decode(inputSchemaStruct, outputRef[j], false);
-                    //console.log("Dive Out!!! 1")
-                    continue;
+        let currentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 1];
+
+        switch (currentContext.pendingReadStage) {
+            case (ReadStage.StaticQuery): {
+                return msgpackStaticQuerySize(currentContext.type);
+            }
+            case (ReadStage.DynamicQuery): {
+                if(msgpackIsTagContainer(currentContext.type)) {
+                    return 1;
+                } else {
+                    return currentContext.sizeLeft;
                 }
+                
+            }
+            case (ReadStage.Complete): {
+                // If we ever read this, then the context stack wasn't cleared correctly
+                throw new Error("Invalid Stack Stage");
+            }
+        }
+    }
 
-                if (schemaEntryType instanceof Array) {
-                    const tag = readNextTag();
-                    //console.log(`${getType(tag.type)} | ${tag.size} | ${tag.value}`)
+    private consumeTag(readContents: Buffer): any {
+        let outputObject = undefined;
 
-                    if (schemaEntryType.length == 1) {
-                        //console.log("Array Path")
-                        outputRef[schemaFieldName] = [];
+        if (this.contextStack.length === 0) {
+            // We should be reading an ID.
+            if (readContents.byteLength !== 1) {
+                throw new Error("Buffer Data is not a msgpack tag when expected");
+            }
+            const readTag: number = readContents.readUint8();
+            this.contextStack.push(msgpackTagToContextFrame(readTag));
+        }
 
-                        if (isPrimitiveType(schemaEntryType[0])) {
-                            //console.log("Primitive Branch")
-                            //console.log(repeat)
-                            //console.log(tag.size)
-                            recursive_decode({ "_primitive": schemaEntryType[0] }, outputRef[schemaFieldName], true, tag.size);
+        let currentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 1];
+
+        let needData = false;
+        while (!needData) {
+            switch (currentContext.pendingReadStage) {
+                case (ReadStage.StaticQuery): {
+                    // We should be reading exttype, size or value data based on current context's type.
+
+                    msgpackParseStaticQuery(currentContext, readContents)
+                }
+                case (ReadStage.DynamicQuery): {
+                    // We are either reading a continuous buffer (str/bin/ext) or more tags (array/map)
+
+                    if (msgpackIsTagContainer(currentContext.type)) {
+                        // We should be reading an ID.
+                        if (readContents.byteLength !== 1) {
+                            throw new Error("Buffer Data is not a msgpack tag when expected");
+                        }
+                        const readTag: number = readContents.readUint8();
+                        this.contextStack.push(msgpackTagToContextFrame(readTag));
+                    } else {
+                        msgpackParseDynamicQuery(currentContext, readContents);
+                    }
+                }
+                case (ReadStage.Complete): {
+                    // Data is complete, move the data and pop the context off the stack.
+
+                    if (this.contextStack.length > 1) {
+                        // The data we're about to pop can be stored in a parent context.
+
+                        const parentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 2];
+                        if (parentContext.type === msgpackType.fixarray || parentContext.type === msgpackType.array16 || parentContext.type === msgpackType.array32) {
+                            parentContext.value.push(currentContext.value);
+                        } else if (parentContext.type === msgpackType.fixmap || parentContext.type === msgpackType.map16 || parentContext.type === msgpackType.map32) {
+                            if (parentContext.sizeLeft & 1) {
+                                parentContext.value[parentContext.objectKeyStorage] = currentContext.value;
+                            } else {
+                                parentContext.objectKeyStorage = currentContext.value;
+                            }
                         } else {
-                            //console.log("Struct Branch")
-                            //console.log(repeat)
-                            //console.log(tag.size)
-                            recursive_decode(structDefinitions[schemaEntryType[0]], outputRef[schemaFieldName], true, tag.size);
+                            throw new Error("Why is the parent context not a container??")
                         }
 
+                        parentContext.sizeLeft -= 1;
+                        if(parentContext.sizeLeft <= 0) {
+                            parentContext.pendingReadStage = ReadStage.Complete;
+                        }
                     } else {
-                        outputRef[schemaFieldName] = tag.value;
-                        //console.log("Buffer Path")
+                        // No parent context means that this object is ready to be pushed out of the stream.
+
+                        outputObject = this.contextStack[this.contextStack.length - 1].value;
                     }
-                } else {
-                    //console.log("Property Path")
-                    const tag = readNextTag();
-                    if(insideArray) {
-                        outputRef[j] = tag.value;
-                    } else {
-                        outputRef[schemaFieldName] = tag.value;
-                    }
-                    //console.log(`${getType(tag.type)} | ${tag.size} | ${tag.value}`)
+
+                    this.contextStack.pop();
+                    currentContext = this.contextStack[this.contextStack.length - 1];
                 }
             }
+
+            if (currentContext.pendingReadStage == ReadStage.Complete) {
+                needData = false;
+            } else {
+                needData = true
+            }
         }
 
 
-        /*
-        console.log(data.byteLength)
-        while (dataIndex < data.byteLength) {
-            const tag = readNextTag();
-            console.log(`${getType(tag.type)} | ${tag.size} | ${tag.value}`)
-        }
-        */
-    }
-    recursive_decode(startStruct, output[structDefinitionsKeys[structDefinitionsKeys.length - 1]]);
-
-    function readNextTag(): TagInfo {
-        const token: number = data[dataIndex];
-
-        let tagInfo: TagInfo = {
-            type: type.neverused,
-            value: null,
-            size: null
-        }
-
-        switch (token) {
-            case type.nil: {
-                tagInfo.type = type.nil;
-            }
-            case type.neverused: {
-                break;
-            }
-            case type.false: {
-                tagInfo.type = type.false;
-                break;
-            }
-            case type.true: {
-                tagInfo.type = type.true;
-                break;
-            }
-            case type.bin8: {
-                const size = data.readUint8(dataIndex + 1);
-                dataIndex++;
-
-                const buffer = readBin(data, dataIndex, size);
-                tagInfo.type = type.bin8;
-                tagInfo.value = buffer;
-                tagInfo.size = size;
-
-                dataIndex += size;
-                break;
-            }
-            case type.bin16: {
-                const size = data.readUint16BE(dataIndex + 1);
-                dataIndex += 2;
-
-                const buffer = readBin(data, dataIndex, size);
-                tagInfo.type = type.bin8;
-                tagInfo.value = buffer;
-                tagInfo.size = size;
-                dataIndex += size;
-                break;
-            }
-            case type.bin32: {
-                const size = data.readUint32BE(dataIndex + 1);
-                dataIndex += 4;
-
-                const buffer = readBin(data, dataIndex, size);
-                tagInfo.type = type.bin8;
-                tagInfo.value = buffer;
-                tagInfo.size = size;
-                dataIndex += size;
-                break;
-            }
-            case type.ext8: {
-                console.log("Not Implemented!");
-                const size = data.readUint8(dataIndex + 1);
-                dataIndex += 1 + 1;
-
-                dataIndex += size;
-                break;
-            }
-            case type.ext16: {
-                console.log("Not Implemented!");
-                const size = data.readUint16BE(dataIndex + 1);
-                dataIndex += 2 + 1;
-
-                dataIndex += size;
-                break;
-            }
-            case type.ext32: {
-                console.log("Not Implemented!");
-                const size = data.readUint32BE(dataIndex + 1);
-                dataIndex += 4 + 1;
-
-                dataIndex += size;
-                break;
-            }
-            case type.float32: {
-                tagInfo.type = type.float32;
-                tagInfo.value = data.readFloatBE(dataIndex + 1);
-                dataIndex += 4;
-                break;
-            }
-            case type.float64: {
-                tagInfo.type = type.float64;
-                tagInfo.value = data.readDoubleBE(dataIndex + 1);
-                dataIndex += 8;
-                break;
-            }
-            case type.uint8: {
-                tagInfo.type = type.uint8;
-                tagInfo.value = data.readUint8(dataIndex + 1);
-                dataIndex++;
-                break;
-            }
-            case type.uint16: {
-                tagInfo.type = type.uint16;
-                tagInfo.value = data.readUint16BE(dataIndex + 1);
-                dataIndex += 2;
-                break;
-            }
-            case type.uint32: {
-                tagInfo.type = type.uint32;
-                tagInfo.value = data.readUint32BE(dataIndex + 1);
-                dataIndex += 4;
-                break;
-            }
-            case type.uint64: {
-                tagInfo.type = type.uint64;
-                tagInfo.value = data.readBigUInt64BE(dataIndex + 1);
-                dataIndex += 8;
-                break;
-            }
-            case type.int8: {
-                tagInfo.type = type.int8;
-                tagInfo.value = data.readInt8(dataIndex + 1);
-                dataIndex++;
-                break;
-            }
-            case type.int16: {
-                tagInfo.type = type.int16;
-                tagInfo.value = data.readInt16BE(dataIndex + 1);
-                dataIndex += 2;
-                break;
-            }
-            case type.int32: {
-                tagInfo.type = type.int32;
-                tagInfo.value = data.readInt32BE(dataIndex + 1);
-                dataIndex += 4;
-                break;
-            }
-            case type.int64: {
-                tagInfo.type = type.int64;
-                tagInfo.value = data.readBigInt64BE(dataIndex + 1);
-                dataIndex += 8;
-                break;
-            }
-            case type.fixext1: {
-                console.log("Not Implemented!");
-                dataIndex += 1 + 1;
-                break;
-            }
-            case type.fixext2: {
-                console.log("Not Implemented!");
-                dataIndex += 2 + 1;
-                break;
-            }
-            case type.fixext4: {
-                console.log("Not Implemented!");
-                dataIndex += 4 + 1;
-                break;
-            }
-            case type.fixext8: {
-                console.log("Not Implemented!");
-                dataIndex += 8 + 1;
-                break;
-            }
-            case type.fixext16: {
-                console.log("Not Implemented!");
-                dataIndex += 16 + 1;
-                break;
-            }
-            case type.str8: {
-                const size = data[dataIndex + 1];
-                dataIndex++;
-
-                const str = readStr(data, dataIndex + 1, size);
-                tagInfo.type = type.str8;
-                tagInfo.value = str;
-                tagInfo.size = size;
-
-                dataIndex += size;
-                break;
-            }
-            case type.str16: {
-                const size = data.readUint16BE(dataIndex + 1);
-                dataIndex += 2;
-
-                const str = readStr(data, dataIndex + 1, size);
-                tagInfo.type = type.str16;
-                tagInfo.value = str;
-                tagInfo.size = size;
-                dataIndex += size;
-                break;
-            }
-            case type.str32: {
-                const size = data.readUint32BE(dataIndex + 1);
-                dataIndex += 4;
-
-                const str = readStr(data, dataIndex + 1, size);
-                tagInfo.type = type.str32;
-                tagInfo.value = str;
-                tagInfo.size = size;
-                dataIndex += size;
-                break;
-            }
-            case type.array16: {
-                const size = data.readUint16BE(dataIndex + 1);
-                dataIndex += 2;
-
-                tagInfo.type = type.array16;
-                tagInfo.size = size;
-
-                break;
-            }
-            case type.array32: {
-                const size = data.readUint32BE(dataIndex + 1);
-                dataIndex += 4;
-
-                tagInfo.type = type.array32;
-                tagInfo.size = size;
-
-                break;
-            }
-            case type.map16: {
-                const size = data.readUint16BE(dataIndex + 1);
-                dataIndex += 2;
-
-                tagInfo.type = type.map16;
-                tagInfo.size = size;
-                break;
-            }
-            case type.map32: {
-                const size = data.readUint32BE(dataIndex + 1);
-                dataIndex += 4;
-
-                tagInfo.type = type.map32;
-                tagInfo.size = size;
-                break;
-            }
-            default: {
-                if (token <= type.fixintp) {
-                    tagInfo.type = type.fixintp
-                    tagInfo.value = (token & 0x7f)
-
-                } else if (token <= type.fixmap) {
-                    tagInfo.type = type.fixmap
-                    tagInfo.size = (token & 0x0f)
-
-                } else if (token <= type.fixarray) {
-                    tagInfo.type = type.fixarray
-                    tagInfo.size = (token & 0x0f)
-
-                } else if (token <= type.fixstr) {
-                    const size = (token & 0x1f);
-                    const str = readStr(data, dataIndex + 1, size);
-                    tagInfo.type = type.fixstr
-                    tagInfo.size = (token & 0x1f)
-                    tagInfo.value = str
-
-                    dataIndex += size;
-                } else {
-                    tagInfo.type = type.fixintn
-                    tagInfo.value = -(token & 0x1f)
-                }
-            }
-        }
-
-        dataIndex++
-        return tagInfo;
+        return outputObject;
     }
 
-    return output;
-}
-
-function readStr(data: Buffer, offset: number, size: number): string {
-    return data.subarray(offset, offset + size).toString('utf-8');
-}
-
-function readBin(data: Buffer, offset: number, size: number): Buffer {
-    return data.subarray(offset, offset + size);
-}
-
-function isPrimitiveType(str: string): boolean {
-    switch (str) {
-        case 'bool':
-        case 'u8':
-        case 'u16':
-        case 'u32':
-        case 'u64':
-        case 'i8':
-        case 'i16':
-        case 'i32':
-        case 'i64':
-        case 'f32':
-        case 'f64':
-        case 'str':
-        case 'object':
-        case 'class': {
-            return true
+    private eatBufferQueue(bytes: number): Buffer {
+        if (bytes > this.bufferQueueBytes) {
+            throw new Error("Unable to request more bytes than the BufferQueue contains.")
         }
-        default: {
 
-            return false
+        let bytesLeft: number = bytes;
+        let outputBuffer: Buffer = Buffer.alloc(bytes);
+
+        const MAX_ITER = 4_294_967_296;
+        for (let i = 0; i > MAX_ITER; i++) {
+            let currentBuffer: TrackedBuffer = this.bufferQueue[0];
+
+            if (currentBuffer.buf.byteLength - currentBuffer.readPtrPos < bytesLeft) {
+                // We can read all we need from the current buffer
+                currentBuffer.buf.copy(outputBuffer, bytes - bytesLeft, currentBuffer.readPtrPos, currentBuffer.readPtrPos + bytesLeft);
+                this.bufferQueueBytes -= bytesLeft;
+                currentBuffer.readPtrPos += bytesLeft;
+                return outputBuffer;
+
+            } else {
+                // We can read the entire buffer, but we need the next buffer to grab more information.
+                currentBuffer.buf.copy(outputBuffer, bytes - bytesLeft, currentBuffer.readPtrPos, currentBuffer.buf.byteLength)
+                this.bufferQueueBytes -= currentBuffer.readPtrPos - currentBuffer.buf.byteLength;
+                bytesLeft -= currentBuffer.readPtrPos - currentBuffer.buf.byteLength;
+                this.bufferQueue.shift();
+            }
+        }
+
+        throw new Error("Max Iterations Exceeded!")
+    }
+}
+
+function msgpackStaticQuerySize(type: msgpackType): number {
+    switch (type) {
+        case msgpackType.fixintp: return 0;
+        case msgpackType.fixmap: return 0;
+        case msgpackType.fixarray: return 0;
+        case msgpackType.fixstr: return 0;
+        case msgpackType.nil: return 0;
+        case msgpackType.neverused: return 0;
+        case msgpackType.false: return 0;
+        case msgpackType.true: return 0;
+        case msgpackType.bin8: return 1;
+        case msgpackType.bin16: return 2;
+        case msgpackType.bin32: return 4;
+        case msgpackType.ext8: return 2;
+        case msgpackType.ext16: return 3;
+        case msgpackType.ext32: return 5;
+        case msgpackType.float32: return 4;
+        case msgpackType.float64: return 8;
+        case msgpackType.uint8: return 1;
+        case msgpackType.uint16: return 2;
+        case msgpackType.uint32: return 4;
+        case msgpackType.uint64: return 8;
+        case msgpackType.int8: return 1;
+        case msgpackType.int16: return 2;
+        case msgpackType.int32: return 4;
+        case msgpackType.int64: return 8;
+        case msgpackType.fixext1: return 2;
+        case msgpackType.fixext2: return 3;
+        case msgpackType.fixext4: return 5;
+        case msgpackType.fixext8: return 9;
+        case msgpackType.fixext16: return 17;
+        case msgpackType.str8: return 1;
+        case msgpackType.str16: return 2;
+        case msgpackType.str32: return 4;
+        case msgpackType.array16: return 2;
+        case msgpackType.array32: return 4;
+        case msgpackType.map16: return 2;
+        case msgpackType.map32: return 4;
+        case msgpackType.fixintn: return 0;
+    }
+}
+
+function msgpackParseStaticQuery(context: ContextStackFrame, data: Buffer) {
+    const expectedSize = msgpackStaticQuerySize(context.type);
+    if (data.byteLength !== expectedSize) {
+        throw new Error("Buffer Data is not expected size.");
+    }
+
+    switch (context.type) {
+        case (msgpackType.fixintp):
+        case (msgpackType.fixmap):
+        case (msgpackType.fixarray):
+        case (msgpackType.fixstr):
+        case (msgpackType.nil):
+        case (msgpackType.neverused):
+        case (msgpackType.false):
+        case (msgpackType.true):
+        case (msgpackType.fixintn): {
+            throw new Error("Invalid State");
+        }
+        case (msgpackType.bin8): {
+            context.sizeLeft = data.readUint8();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.bin16): {
+            context.sizeLeft = data.readUint16BE();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.bin32): {
+            context.sizeLeft = data.readUint32BE();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.ext8): {
+            context.sizeLeft = data.readUint8();
+            //data.readUint8(expectedSize - 1); // type
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.ext16): {
+            context.sizeLeft = data.readUint16BE();
+            //data.readUint8(expectedSize - 1); // type
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.ext32): {
+            context.sizeLeft = data.readUint32BE();
+            //data.readUint8(expectedSize - 1); // type
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.float32): {
+            context.value = data.readFloatBE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.float64): {
+            context.value = data.readDoubleBE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.uint8): {
+            context.value = data.readUInt8();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.uint16): {
+            context.value = data.readUint16BE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.uint32): {
+            context.value = data.readUint32BE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.uint64): {
+            context.value = data.readBigUint64BE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.int8): {
+            context.value = data.readInt8();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.int16): {
+            context.value = data.readInt16BE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.int32): {
+            context.value = data.readInt32BE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.int64): {
+            context.value = data.readBigInt64BE();
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.fixext1):
+        case (msgpackType.fixext2):
+        case (msgpackType.fixext4):
+        case (msgpackType.fixext8):
+        case (msgpackType.fixext16): {
+            //data.readUint8(); // type
+            context.value = data.subarray(1);
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.str8): {
+            context.sizeLeft = data.readUint8();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.str16): {
+            context.sizeLeft = data.readUint16BE();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.str32): {
+            context.sizeLeft = data.readUint32BE();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.array16): {
+            context.sizeLeft = data.readUint16BE();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.array32): {
+            context.sizeLeft = data.readUint32BE();
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.map16): {
+            context.sizeLeft = data.readUint16BE() * 2;
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+        case (msgpackType.map32): {
+            context.sizeLeft = data.readUint32BE() * 2;
+            context.pendingReadStage = ReadStage.DynamicQuery;
+            break;
+        }
+
+    }
+}
+
+function msgpackParseDynamicQuery(context: ContextStackFrame, data: Buffer) {
+    switch (context.type) {
+        case (msgpackType.fixintp):
+        case (msgpackType.nil):
+        case (msgpackType.neverused):
+        case (msgpackType.false):
+        case (msgpackType.true):
+        case (msgpackType.fixintn):
+        case (msgpackType.float32):
+        case (msgpackType.float64):
+        case (msgpackType.uint8):
+        case (msgpackType.uint16):
+        case (msgpackType.uint32):
+        case (msgpackType.uint64):
+        case (msgpackType.int8):
+        case (msgpackType.int16):
+        case (msgpackType.int32):
+        case (msgpackType.int64):
+        case (msgpackType.fixext1):
+        case (msgpackType.fixext2):
+        case (msgpackType.fixext4):
+        case (msgpackType.fixext8):
+        case (msgpackType.fixext16):
+        case (msgpackType.fixarray):
+        case (msgpackType.fixmap):
+        case (msgpackType.array16):
+        case (msgpackType.array32):
+        case (msgpackType.map16):
+        case (msgpackType.map32): {
+            throw new Error("Invalid State");
+        }
+        case (msgpackType.fixstr):
+
+        case (msgpackType.bin8): {
+            if (data.byteLength !== context.sizeLeft) {
+                throw new Error("Buffer Data is not expected size.");
+            }
+            context.sizeLeft = 0;
+            context.value = data;
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.bin16): {
+            if (data.byteLength !== context.sizeLeft) {
+                throw new Error("Buffer Data is not expected size.");
+            }
+            context.sizeLeft = 0;
+            context.value = data;
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.bin32): {
+            if (data.byteLength !== context.sizeLeft) {
+                throw new Error("Buffer Data is not expected size.");
+            }
+            context.sizeLeft = 0;
+            context.value = data;
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.ext8): {
+            context.sizeLeft = 0;
+            context.value = data;
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.ext16): {
+            context.sizeLeft = 0;
+            context.value = data;
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.ext32): {
+            context.sizeLeft = 0;
+            context.value = data;
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.str8): {
+            context.sizeLeft = 0;
+            context.value = data.toString('utf-8');
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.str16): {
+            context.sizeLeft = 0;
+            context.value = data.toString('utf-8');
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
+        case (msgpackType.str32): {
+            context.sizeLeft = 0;
+            context.value = data.toString('utf-8');
+            context.pendingReadStage = ReadStage.Complete;
+            break;
         }
     }
+
+}
+
+function msgpackIsTagContainer(type: msgpackType): boolean {
+    switch (type) {
+        case msgpackType.fixintp: return false;
+        case msgpackType.fixmap: return true;
+        case msgpackType.fixarray: return true;
+        case msgpackType.fixstr: return false;
+        case msgpackType.nil: return false;
+        case msgpackType.neverused: return false;
+        case msgpackType.false: return false;
+        case msgpackType.true: return false;
+        case msgpackType.bin8: return false;
+        case msgpackType.bin16: return false;
+        case msgpackType.bin32: return false;
+        case msgpackType.ext8: return false;
+        case msgpackType.ext16: return false;
+        case msgpackType.ext32: return false;
+        case msgpackType.float32: return false;
+        case msgpackType.float64: return false;
+        case msgpackType.uint8: return false;
+        case msgpackType.uint16: return false;
+        case msgpackType.uint32: return false;
+        case msgpackType.uint64: return false;
+        case msgpackType.int8: return false;
+        case msgpackType.int16: return false;
+        case msgpackType.int32: return false;
+        case msgpackType.int64: return false;
+        case msgpackType.fixext1: return false;
+        case msgpackType.fixext2: return false;
+        case msgpackType.fixext4: return false;
+        case msgpackType.fixext8: return false;
+        case msgpackType.fixext16: return false;
+        case msgpackType.str8: return false;
+        case msgpackType.str16: return false;
+        case msgpackType.str32: return false;
+        case msgpackType.array16: return true;
+        case msgpackType.array32: return true;
+        case msgpackType.map16: return true;
+        case msgpackType.map32: return true;
+        case msgpackType.fixintn: return false;
+    }
+}
+
+function msgpackTagToContextFrame(tag: number): ContextStackFrame {
+
+    const msgpackTypeValues: number[] = [
+        msgpackType.fixintp,
+        msgpackType.fixmap,
+        msgpackType.fixarray,
+        msgpackType.fixstr,
+        msgpackType.nil,
+        msgpackType.neverused,
+        msgpackType.false,
+        msgpackType.true,
+        msgpackType.bin8,
+        msgpackType.bin16,
+        msgpackType.bin32,
+        msgpackType.ext8,
+        msgpackType.ext16,
+        msgpackType.ext32,
+        msgpackType.float32,
+        msgpackType.float64,
+        msgpackType.uint8,
+        msgpackType.uint16,
+        msgpackType.uint32,
+        msgpackType.uint64,
+        msgpackType.int8,
+        msgpackType.int16,
+        msgpackType.int32,
+        msgpackType.int64,
+        msgpackType.fixext1,
+        msgpackType.fixext2,
+        msgpackType.fixext4,
+        msgpackType.fixext8,
+        msgpackType.fixext16,
+        msgpackType.str8,
+        msgpackType.str16,
+        msgpackType.str32,
+        msgpackType.array16,
+        msgpackType.array32,
+        msgpackType.map16,
+        msgpackType.map32,
+        msgpackType.fixintn
+    ]
+    let deducedType: msgpackType;
+    for (let i = 0; i < msgpackTypeValues.length; i++) {
+        if (tag <= msgpackTypeValues[i]) {
+            deducedType = msgpackTypeValues[i];
+        }
+    }
+
+    let contextFrame: ContextStackFrame;
+
+    switch (deducedType) {
+        case (msgpackType.fixintp): {
+            contextFrame = {
+                pendingReadStage: ReadStage.Complete,
+                type: deducedType,
+                sizeLeft: 0,
+                value: (tag & 0x7f)
+            }
+            break;
+        }
+        case (msgpackType.fixmap): {
+            contextFrame = {
+                pendingReadStage: ReadStage.DynamicQuery,
+                type: deducedType,
+                sizeLeft: (tag & 0x0f) * 2,
+                value: {},
+            }
+            break;
+        }
+        case (msgpackType.fixarray): {
+            contextFrame = {
+                pendingReadStage: ReadStage.DynamicQuery,
+                type: deducedType,
+                sizeLeft: (tag & 0x0f),
+                value: [],
+            }
+            break;
+        }
+        case (msgpackType.fixstr): {
+            contextFrame = {
+                pendingReadStage: ReadStage.DynamicQuery,
+                type: deducedType,
+                sizeLeft: (tag & 0x1f),
+                value: "",
+            }
+            break;
+        }
+        case (msgpackType.nil): {
+            contextFrame = {
+                pendingReadStage: ReadStage.Complete,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.neverused): {
+            contextFrame = {
+                pendingReadStage: ReadStage.Complete,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.false): {
+            contextFrame = {
+                pendingReadStage: ReadStage.Complete,
+                type: deducedType,
+                sizeLeft: 0,
+                value: false,
+            }
+            break;
+        }
+        case (msgpackType.true): {
+            contextFrame = {
+                pendingReadStage: ReadStage.Complete,
+                type: deducedType,
+                sizeLeft: 0,
+                value: true,
+            }
+            break;
+        }
+        case (msgpackType.bin8): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.bin16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.bin32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.ext8): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.ext16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.ext32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.float32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.float64): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.uint8): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.uint16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.uint32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null
+            }
+            break;
+        }
+        case (msgpackType.uint64): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.int8): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.int16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.int32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.int64): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.fixext1): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.fixext2): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.fixext4): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.fixext8): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.fixext16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: null,
+            }
+            break;
+        }
+        case (msgpackType.str8): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: "",
+            }
+            break;
+        }
+        case (msgpackType.str16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: "",
+            }
+            break;
+        }
+        case (msgpackType.str32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: "",
+            }
+            break;
+        }
+        case (msgpackType.array16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: [],
+            }
+            break;
+        }
+        case (msgpackType.array32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: [],
+            }
+            break;
+        }
+        case (msgpackType.map16): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: {},
+            }
+            break;
+        }
+        case (msgpackType.map32): {
+            contextFrame = {
+                pendingReadStage: ReadStage.StaticQuery,
+                type: deducedType,
+                sizeLeft: 0,
+                value: {},
+            }
+            break;
+        }
+        case (msgpackType.fixintn): {
+            contextFrame = {
+                pendingReadStage: ReadStage.Complete,
+                type: deducedType,
+                sizeLeft: 0,
+                value: -(tag & 0x1f),
+            }
+            break;
+        }
+    }
+
+    return contextFrame;
 }
 
 function getTypeDebug(num: number): string {
 
     switch (num) {
-        case type.fixintp: return "fixintp  ";
-        case type.fixmap: return "fixmap   ";
-        case type.fixarray: return "fixarray ";
-        case type.fixstr: return "fixstr   ";
-        case type.nil: return "nil      ";
-        case type.neverused: return "neverused";
-        case type.false: return "false    ";
-        case type.true: return "true     ";
-        case type.bin8: return "bin8     ";
-        case type.bin16: return "bin16    ";
-        case type.bin32: return "bin32    ";
-        case type.ext8: return "ext8     ";
-        case type.ext16: return "ext16    ";
-        case type.ext32: return "ext32    ";
-        case type.float32: return "float32  ";
-        case type.float64: return "float64  ";
-        case type.uint8: return "uint8    ";
-        case type.uint16: return "uint16   ";
-        case type.uint32: return "uint32   ";
-        case type.uint64: return "uint64   ";
-        case type.int8: return "int8     ";
-        case type.int16: return "int16    ";
-        case type.int32: return "int32    ";
-        case type.int64: return "int64    ";
-        case type.fixext1: return "fixext1  ";
-        case type.fixext2: return "fixext2  ";
-        case type.fixext4: return "fixext4  ";
-        case type.fixext8: return "fixext8  ";
-        case type.fixext16: return "fixext16 ";
-        case type.str8: return "str8     ";
-        case type.str16: return "str16    ";
-        case type.str32: return "str32    ";
-        case type.array16: return "array16  ";
-        case type.array32: return "array32  ";
-        case type.map16: return "map16    ";
-        case type.map32: return "map32    ";
-        case type.fixintn: return "fixintn  ";
+        case msgpackType.fixintp: return "fixintp  ";
+        case msgpackType.fixmap: return "fixmap   ";
+        case msgpackType.fixarray: return "fixarray ";
+        case msgpackType.fixstr: return "fixstr   ";
+        case msgpackType.nil: return "nil      ";
+        case msgpackType.neverused: return "neverused";
+        case msgpackType.false: return "false    ";
+        case msgpackType.true: return "true     ";
+        case msgpackType.bin8: return "bin8     ";
+        case msgpackType.bin16: return "bin16    ";
+        case msgpackType.bin32: return "bin32    ";
+        case msgpackType.ext8: return "ext8     ";
+        case msgpackType.ext16: return "ext16    ";
+        case msgpackType.ext32: return "ext32    ";
+        case msgpackType.float32: return "float32  ";
+        case msgpackType.float64: return "float64  ";
+        case msgpackType.uint8: return "uint8    ";
+        case msgpackType.uint16: return "uint16   ";
+        case msgpackType.uint32: return "uint32   ";
+        case msgpackType.uint64: return "uint64   ";
+        case msgpackType.int8: return "int8     ";
+        case msgpackType.int16: return "int16    ";
+        case msgpackType.int32: return "int32    ";
+        case msgpackType.int64: return "int64    ";
+        case msgpackType.fixext1: return "fixext1  ";
+        case msgpackType.fixext2: return "fixext2  ";
+        case msgpackType.fixext4: return "fixext4  ";
+        case msgpackType.fixext8: return "fixext8  ";
+        case msgpackType.fixext16: return "fixext16 ";
+        case msgpackType.str8: return "str8     ";
+        case msgpackType.str16: return "str16    ";
+        case msgpackType.str32: return "str32    ";
+        case msgpackType.array16: return "array16  ";
+        case msgpackType.array32: return "array32  ";
+        case msgpackType.map16: return "map16    ";
+        case msgpackType.map32: return "map32    ";
+        case msgpackType.fixintn: return "fixintn  ";
     }
 }
