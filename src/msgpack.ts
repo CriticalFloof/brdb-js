@@ -65,19 +65,19 @@ export class MsgPackDecodeStream extends Transform {
     private bufferQueue: TrackedBuffer[] = [];
     private bufferQueueBytes: number = 0;
 
-    private contextStack: ContextStackFrame[];
+    private contextStack: ContextStackFrame[] = [];
 
-    public constructor(options) {
+    public constructor() {
         super({ objectMode: true });
     }
 
     public _transform(chunk: Buffer, _: BufferEncoding, callback: TransformCallback): void {
-        // The process of reading a tag goes in most 3 stages:
+        // The process of reading a tag goes in most 4 stages:
         // Read the type tag, which is always 1 byte, and push to the context stack [Identification]
         // Then read the rest of the static info coupled to the tag we just read. [Static Query]
         // Finally, if we're in a tag container we repeat the other stages without popping off the stack until the read size is reached [Dynamic Query / Tag Container]
         // If we're not in a tag container then we continuously read a set size of bytes until the read size is reached. [Dynamic Query / Buffer Container]
-        // Once finished, we pop off context stack, and repeat everything until no more data.
+        // Once finished, we pop off context stack, and repeat everything until no more data. [Complete]
 
         // The Static Query stage only relies upon the type that we read in the ID stage.
         // The Dynamic Query stage only relies upon the size that we read in either the ID or Static Query stage.
@@ -89,16 +89,30 @@ export class MsgPackDecodeStream extends Transform {
 
 
         let nextQuerySize: number = this.getNextQuerySize();
-        while (this.bufferQueueBytes > nextQuerySize) {
-            const msgpackData: Buffer = this.eatBufferQueue(nextQuerySize)
-            this.consumeTag(msgpackData);
+        while (this.bufferQueueBytes >= nextQuerySize) {
+            
 
+            //console.log("QUERY " + nextQuerySize)
+            //console.log("FREE BYTES " + this.bufferQueueBytes)
+
+            const msgpackData: Buffer = this.eatBufferQueue(nextQuerySize);
+            const result = this.advanceContext(msgpackData);
+
+            if (result !== undefined) {
+                this.push(result);
+            }
             nextQuerySize = this.getNextQuerySize();
+            //console.log("QUERY " + nextQuerySize)
+            //console.log("FREE BYTES AFTER " + this.bufferQueueBytes)
+            //console.log("======")
+            //console.log("SNAP")
+            //console.dir(this.contextStack, {depth:null})
         }
     }
 
     private getNextQuerySize(): number {
         if (this.contextStack.length === 0) return 1;
+
 
         let currentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 1];
 
@@ -107,12 +121,12 @@ export class MsgPackDecodeStream extends Transform {
                 return msgpackStaticQuerySize(currentContext.type);
             }
             case (ReadStage.DynamicQuery): {
-                if(msgpackIsTagContainer(currentContext.type)) {
+                if (msgpackIsTagContainer(currentContext.type)) {
                     return 1;
                 } else {
                     return currentContext.sizeLeft;
                 }
-                
+
             }
             case (ReadStage.Complete): {
                 // If we ever read this, then the context stack wasn't cleared correctly
@@ -121,7 +135,7 @@ export class MsgPackDecodeStream extends Transform {
         }
     }
 
-    private consumeTag(readContents: Buffer): any {
+    private advanceContext(readContents: Buffer): any {
         let outputObject = undefined;
 
         if (this.contextStack.length === 0) {
@@ -131,17 +145,26 @@ export class MsgPackDecodeStream extends Transform {
             }
             const readTag: number = readContents.readUint8();
             this.contextStack.push(msgpackTagToContextFrame(readTag));
-        }
+            let currentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 1];
+            if (msgpackIsTagContainer(currentContext.type) && currentContext.sizeLeft < 1) {
+                currentContext.pendingReadStage = ReadStage.Complete;
+            }
 
-        let currentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 1];
+            if (this.contextStack[0].pendingReadStage !== ReadStage.Complete) {
+                return undefined;
+            }
+        }
 
         let needData = false;
         while (!needData) {
+            let currentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 1];
+
             switch (currentContext.pendingReadStage) {
                 case (ReadStage.StaticQuery): {
                     // We should be reading exttype, size or value data based on current context's type.
 
                     msgpackParseStaticQuery(currentContext, readContents)
+                    break;
                 }
                 case (ReadStage.DynamicQuery): {
                     // We are either reading a continuous buffer (str/bin/ext) or more tags (array/map)
@@ -153,9 +176,14 @@ export class MsgPackDecodeStream extends Transform {
                         }
                         const readTag: number = readContents.readUint8();
                         this.contextStack.push(msgpackTagToContextFrame(readTag));
+                        currentContext = this.contextStack[this.contextStack.length - 1];
+                        if (msgpackIsTagContainer(currentContext.type) && currentContext.sizeLeft < 1) {
+                            currentContext.pendingReadStage = ReadStage.Complete;
+                        }
                     } else {
                         msgpackParseDynamicQuery(currentContext, readContents);
                     }
+                    break;
                 }
                 case (ReadStage.Complete): {
                     // Data is complete, move the data and pop the context off the stack.
@@ -164,6 +192,7 @@ export class MsgPackDecodeStream extends Transform {
                         // The data we're about to pop can be stored in a parent context.
 
                         const parentContext: ContextStackFrame = this.contextStack[this.contextStack.length - 2];
+
                         if (parentContext.type === msgpackType.fixarray || parentContext.type === msgpackType.array16 || parentContext.type === msgpackType.array32) {
                             parentContext.value.push(currentContext.value);
                         } else if (parentContext.type === msgpackType.fixmap || parentContext.type === msgpackType.map16 || parentContext.type === msgpackType.map32) {
@@ -177,7 +206,7 @@ export class MsgPackDecodeStream extends Transform {
                         }
 
                         parentContext.sizeLeft -= 1;
-                        if(parentContext.sizeLeft <= 0) {
+                        if (parentContext.sizeLeft <= 0) {
                             parentContext.pendingReadStage = ReadStage.Complete;
                         }
                     } else {
@@ -188,16 +217,17 @@ export class MsgPackDecodeStream extends Transform {
 
                     this.contextStack.pop();
                     currentContext = this.contextStack[this.contextStack.length - 1];
+                    break;
                 }
             }
 
-            if (currentContext.pendingReadStage == ReadStage.Complete) {
-                needData = false;
+
+            if (currentContext === undefined || currentContext.pendingReadStage !== ReadStage.Complete) {
+                needData = true;
             } else {
-                needData = true
+                needData = false;
             }
         }
-
 
         return outputObject;
     }
@@ -211,10 +241,9 @@ export class MsgPackDecodeStream extends Transform {
         let outputBuffer: Buffer = Buffer.alloc(bytes);
 
         const MAX_ITER = 4_294_967_296;
-        for (let i = 0; i > MAX_ITER; i++) {
+        for (let i = 0; i < MAX_ITER; i++) {
             let currentBuffer: TrackedBuffer = this.bufferQueue[0];
-
-            if (currentBuffer.buf.byteLength - currentBuffer.readPtrPos < bytesLeft) {
+            if (currentBuffer.buf.byteLength - currentBuffer.readPtrPos >= bytesLeft) {
                 // We can read all we need from the current buffer
                 currentBuffer.buf.copy(outputBuffer, bytes - bytesLeft, currentBuffer.readPtrPos, currentBuffer.readPtrPos + bytesLeft);
                 this.bufferQueueBytes -= bytesLeft;
@@ -424,9 +453,14 @@ function msgpackParseStaticQuery(context: ContextStackFrame, data: Buffer) {
         }
 
     }
+
 }
 
 function msgpackParseDynamicQuery(context: ContextStackFrame, data: Buffer) {
+    if (data.byteLength !== context.sizeLeft) {
+        throw new Error("Buffer Data is not expected size.");
+    }
+
     switch (context.type) {
         case (msgpackType.fixintp):
         case (msgpackType.nil):
@@ -457,30 +491,26 @@ function msgpackParseDynamicQuery(context: ContextStackFrame, data: Buffer) {
         case (msgpackType.map32): {
             throw new Error("Invalid State");
         }
-        case (msgpackType.fixstr):
-
+        case (msgpackType.fixstr): {
+            context.sizeLeft = 0;
+            context.value = data.toString('utf-8');
+            
+            context.pendingReadStage = ReadStage.Complete;
+            break;
+        }
         case (msgpackType.bin8): {
-            if (data.byteLength !== context.sizeLeft) {
-                throw new Error("Buffer Data is not expected size.");
-            }
             context.sizeLeft = 0;
             context.value = data;
             context.pendingReadStage = ReadStage.Complete;
             break;
         }
         case (msgpackType.bin16): {
-            if (data.byteLength !== context.sizeLeft) {
-                throw new Error("Buffer Data is not expected size.");
-            }
             context.sizeLeft = 0;
             context.value = data;
             context.pendingReadStage = ReadStage.Complete;
             break;
         }
         case (msgpackType.bin32): {
-            if (data.byteLength !== context.sizeLeft) {
-                throw new Error("Buffer Data is not expected size.");
-            }
             context.sizeLeft = 0;
             context.value = data;
             context.pendingReadStage = ReadStage.Complete;
@@ -613,6 +643,7 @@ function msgpackTagToContextFrame(tag: number): ContextStackFrame {
     for (let i = 0; i < msgpackTypeValues.length; i++) {
         if (tag <= msgpackTypeValues[i]) {
             deducedType = msgpackTypeValues[i];
+            break;
         }
     }
 

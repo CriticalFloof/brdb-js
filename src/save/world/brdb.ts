@@ -5,11 +5,13 @@ import * as DatabaseConstructor from "better-sqlite3";
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pipeline, Readable, Stream } from "node:stream";
+
 import { BLOBS, FILES, FOLDERS } from "../../constants";
 import { BlobsTable, FilesTable, FoldersTable } from "../../db_types";
-import * as msgpack from "../../msgpack";
+import { MsgPackDecodeStream } from "../../msgpack";
 import { buildFileSystem, findAssociatedSchema } from "../../filesystem";
-import { decompressBlob } from "./compress";
+import { ZSTDCompress, ZSTDDecompress } from "simple-zstd";
 
 export default class BRDB {
 
@@ -31,58 +33,28 @@ export default class BRDB {
         const files = this.getFiles();
         const blobs = this.getBlobs();
 
-        const vfs: Object = buildFileSystem(folders, files);
+        const file = files[16 - 1]
+        console.log(file)
+        const blob = blobs[file.content_id - 1]
 
-        const storedSchemas: { [index: string]: Object } = {};
+        
 
-        for (const file of files) {
-            if (file.name.endsWith(".json")) {
-                const rawBlobInfo = blobs[file.content_id - 1];
-                const rawBuffer: Buffer = rawBlobInfo.compression == 0 ? rawBlobInfo.content : await decompressBlob(rawBlobInfo.content);
+        let streams: NodeJS.ReadWriteStream[] = []
 
-                fs.mkdirSync(`./dump`, { recursive: true });
-                fs.writeFile(path.join(`./dump/${file.name}`), rawBuffer.toString(), () => {
-                    console.log(`JSON File './dump/${file.name}' Dumped.`);
-                });
-            } else if (file.name.endsWith(".mps")) {
-                const schemaFile: FilesTable = findAssociatedSchema(folders, vfs, file);
-
-                const schemaBlobInfo = blobs[schemaFile.content_id - 1];
-                let schemaBuffer: Buffer = schemaBlobInfo.compression == 0 ? schemaBlobInfo.content : await decompressBlob(schemaBlobInfo.content);
-
-                const schema: Object = msgpack.decode_schema(schemaBuffer);
-                storedSchemas[schemaFile.name] = schema;
-
-                const rawBlobInfo = blobs[file.content_id - 1];
-                const rawBuffer: Buffer = rawBlobInfo.compression == 0 ? rawBlobInfo.content : await decompressBlob(rawBlobInfo.content);
-
-                const output = msgpack.decode_raw(schema, rawBuffer);
-
-                fs.mkdirSync(`./dump/world_data_json/${schemaFile.name.replace(".schema", "")}`, { recursive: true });
-                fs.writeFile(
-                    path.join(`./dump/world_data_json/${schemaFile.name.replace(".schema", "")}/${file.name.replace(".mps", "")}__${file.file_id}.json`),
-                    JSON.stringify(output, null, 4),
-                    () => {
-                        console.log(
-                            `File './dump/world_data_json/${schemaFile.name.replace(".schema", "")}/${file.name.replace(".mps", "")}__${file.file_id
-                            }.json' Dumped.`
-                        );
-                    }
-                );
-            }
+        if(blob.compression === 1) {
+            streams.push(ZSTDDecompress())
         }
 
-        const storedSchemaKeys = Object.keys(storedSchemas);
+        streams.push(new MsgPackDecodeStream().on("data", (data)=>{
+            console.log("output:")
+            console.dir(data, { depth:6 })
+        }))
+        
 
-        for (let i = 0; i < storedSchemaKeys.length; i++) {
-            const schemaName = storedSchemaKeys[i];
-            const schemaData = storedSchemas[schemaName];
+        pipeline(Readable.from(blob.content), ...streams as [NodeJS.ReadWriteStream], (err) => {
+            console.error(err)
+        })
 
-            fs.mkdirSync(`./dump/found_schemas`, { recursive: true });
-            fs.writeFile(`./dump/found_schemas/${schemaName.replace(".schema", ".json")}`, JSON.stringify(schemaData, null, 4), () => {
-                console.log(`Schema File './dump/found_schemas/${schemaName.replace(".schema", ".json")}' Dumped.`);
-            });
-        }
     }
 
     private getFolders(): FoldersTable[] {
